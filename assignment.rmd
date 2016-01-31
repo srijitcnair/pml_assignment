@@ -1,0 +1,121 @@
+---
+title: "Prediction Assignment Writeup"
+output: html_document
+---
+
+##Objective
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+Aim of this excercise is to train models on the available data and to be able to predict the classe of the excercise
+
+##Data
+The data is available at the below links
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+For faster execution, I have downloaded the data to a local folder and reading csv file using below code
+
+```{r}
+training <- read.csv("c:/Srijit/pml-training.csv", na.strings=c("NA",""))
+testing <- read.csv("c:/Srijit/pml-testing.csv", na.strings=c("NA",""))
+```
+
+##Analysing and cleaning data
+
+On looking at the data we can see that there are many more clumns than that are required by the assignment.
+
+We are going to use only the columsn that are required
+
+```{r}
+colsRequired<-colnames(training)[grepl("belt|[^(fore)]arm|dumbbell|forearm", colnames(training))]
+colsRequiredTraining<-c("classe", colsRequired)
+```
+
+On examining the data, we can also see that many columns have NA in all rows, which need to be removed
+
+```{r}
+training_required_cols <- training[,colsRequiredTraining]
+training_na_count <- sapply(training_required_cols, function(x) {sum(is.na(x))})
+training_clean <- training_required_cols[,training_na_count==0]
+```
+
+##Preparing the data for training 
+Now we have clean data for training the models. Since we have adequate amount of data, we are going to split the available training data into 3; Training set, Validation set, Test set
+
+```{r}
+
+library(caret)
+library(rpart)
+library(randomForest)
+set.seed(12345)
+
+training_clean$classe <- factor(training_clean$classe)
+
+inTrainValidation <- createDataPartition(y=training_clean$classe, p=0.6, list=FALSE)
+testingdata <- training_clean[-inTrainValidation,]
+trainingNValidationdata <- training_clean[inTrainValidation,]
+inTrainValidation <- createDataPartition(y=trainingNValidationdata$classe, p=0.6, list=FALSE)
+trainingdata <- trainingNValidationdata[inTrainValidation,]
+validationdata<- trainingNValidationdata[-inTrainValidation,]
+
+```
+
+## Training approach
+The approach we are going to use is to train three different methods (Random Forest, Bagging and Boosting) and then train an ensemble model to pick correct from the prediction from the first three models
+
+##Train the models
+
+Training the random forest, boosting and bagging models
+
+```{r}
+mod_rf <- train(classe ~ ., method="rf", data=trainingdata, preprocess=c("center", "scale"), trControl = trainControl(method = "cv", number = 4, allowParallel = TRUE))
+mod_gbm <- train(classe ~ ., method="gbm", data=trainingdata, verbose=FALSE)
+mod_bag<- train(classe ~ ., method="treebag", data=trainingdata,verbose=FALSE)
+
+```
+
+##Make predictions on the training data and create ensemble
+
+Now we will make predictions using these models and then using those predictions, we will create an ensemble model using random forest
+
+```{r}
+pred_rf<- predict(mod_rf, trainingdata)
+pred_gbm<- predict(mod_gbm, trainingdata)
+pred_bag<- predict(mod_bag, trainingdata)
+df_comb<- data.frame(pred_rf,pred_gbm, pred_bag, classe=trainingdata$classe)
+mod_comb <- train(classe ~ ., method="rf", data=df_comb)
+```
+
+##Validating the model
+
+Now we can use the validation dataset to validate the performance of the model and compare and study the accuracy
+
+```{r}
+pred_rf_val<- predict(mod_rf, validationdata)
+pred_gbm_val<- predict(mod_gbm, validationdata)
+pred_bag_val<- predict(mod_bag, validationdata)
+pred_comb_val <- predict(mod_comb, data.frame(pred_rf=pred_rf_val, pred_gbm=pred_gbm_val, pred_bag=pred_bag_val))
+
+confusionMatrix(pred_rf_val, validationdata$classe)$overall[1]
+confusionMatrix(pred_gbm_val, validationdata$classe)$overall[1]
+confusionMatrix(pred_bag_val, validationdata$classe)$overall[1]
+confusionMatrix(pred_comb_val, validationdata$classe)$overall[1]
+```
+
+##Selecting a model to use
+Now we are seeing the accuracy for each model and the accuracy of the enseble along with the rest. We see that random forest has the best accuracy on validation set, so we will use that model for the test set
+
+##Running prediction on test set
+
+```{r}
+pred_rf_test<- predict(mod_rf, testing)
+pred_rf_test
+```
+
+This is the prediction result for the test set
